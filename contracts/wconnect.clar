@@ -1,4 +1,4 @@
-;;WattConnect - Energy Trading Smart Contract
+;; WattConnect - Energy Trading Smart Contract
 
 ;; Define constants
 (define-constant contract-owner tx-sender)
@@ -38,8 +38,15 @@
 
 ;; Update energy reserve
 (define-private (update-energy-reserve (amount int))
-  (let ((new-reserve (+ (var-get current-energy-reserve) amount)))
-    (asserts! (and (>= new-reserve u0) (<= new-reserve (var-get energy-reserve-limit))) err-reserve-limit-exceeded)
+  (let (
+    (current-reserve (var-get current-energy-reserve))
+    (new-reserve (if (< amount 0)
+                     (if (>= current-reserve (to-uint (- 0 amount)))
+                         (- current-reserve (to-uint (- 0 amount)))
+                         u0)
+                     (+ current-reserve (to-uint amount))))
+  )
+    (asserts! (<= new-reserve (var-get energy-reserve-limit)) err-reserve-limit-exceeded)
     (var-set current-energy-reserve new-reserve)
     (ok true)))
 
@@ -97,7 +104,7 @@
     (current-for-sale (get amount (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender}))))
   )
     (asserts! (>= current-for-sale amount) err-not-enough-balance)
-    (try! (update-energy-reserve (- (to-int amount))))
+    (try! (update-energy-reserve (to-int (- amount))))
     (map-set energy-for-sale {user: tx-sender} 
              {amount: (- current-for-sale amount), 
               price: (get price (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender})))})
@@ -158,7 +165,7 @@
     (map-set user-energy-balance contract-owner (+ (default-to u0 (map-get? user-energy-balance contract-owner)) amount))
     
     ;; Update energy reserve
-    (try! (update-energy-reserve (- (to-int amount))))
+    (try! (update-energy-reserve (to-int (- amount))))
     
     (ok true)))
 

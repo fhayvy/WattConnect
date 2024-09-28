@@ -41,7 +41,7 @@ The core of WattConnect is a Clarity smart contract that manages energy trading.
 1. Clone the repository:
    ```
    git clone https://github.com/yourusername/WattConnect.git
-   cd solarshare
+   cd WattConnect
    ```
 
 2. Install dependencies:
@@ -69,16 +69,26 @@ The core of WattConnect is a Clarity smart contract that manages energy trading.
    - Use the "Buy Energy" function to purchase available energy.
 4. Monitor your energy and STX balances in real-time.
 
-## Contributing and Collaboration
+## Contributing
 
-We welcome contributions to WattConnect! pull requests can be submitted.
+We welcome contributions to WattConnect! If you'd like to contribute, please follow these steps:
 
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+
+## Contact
+
+Favour Chiamaka Eze - ezefavourchiamaka01@gmail.com
+
+Project Link: [https://github.com/yourusername/WattConnect](https://github.com/yourusername/WattConnect)
 
 ## Acknowledgments
 
 - Stacks community for their robust blockchain platform
 - Renewable energy advocates and early adopters
-
-## Author 
 
 Happy energy trading with WattConnect! Together, we can create a more sustainable and decentralized energy future.
