@@ -9,6 +9,7 @@
 (define-constant err-invalid-amount (err u104))
 (define-constant err-invalid-fee (err u105))
 (define-constant err-refund-failed (err u106))
+(define-constant err-same-user (err u107))
 
 ;; Define data variables
 (define-data-var energy-price uint u100) ;; Price per kWh in microstacks (1 STX = 1,000,000 microstacks)
@@ -19,6 +20,7 @@
 ;; Define data maps
 (define-map user-energy-balance principal uint)
 (define-map user-stx-balance principal uint)
+(define-map energy-for-sale {user: principal} {amount: uint, price: uint})
 
 ;; Private functions
 
@@ -56,40 +58,60 @@
     (var-set refund-rate new-rate)
     (ok true)))
 
-;; Add energy to sell
-(define-public (add-energy (amount uint))
+;; Add energy for sale
+(define-public (add-energy-for-sale (amount uint) (price uint))
   (let (
     (current-balance (default-to u0 (map-get? user-energy-balance tx-sender)))
-    (new-balance (+ current-balance amount))
+    (current-for-sale (get amount (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender}))))
+    (new-for-sale (+ amount current-for-sale))
   )
     (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
-    (asserts! (<= new-balance (var-get max-energy-per-user)) err-invalid-amount) ;; Ensure user doesn't exceed max energy limit
-    (map-set user-energy-balance tx-sender new-balance)
+    (asserts! (> price u0) err-invalid-price) ;; Ensure price is greater than 0
+    (asserts! (>= current-balance new-for-sale) err-not-enough-balance)
+    (map-set energy-for-sale {user: tx-sender} {amount: new-for-sale, price: price})
     (ok true)))
 
-;; Buy energy
-(define-public (buy-energy (amount uint))
+;; Remove energy from sale
+(define-public (remove-energy-from-sale (amount uint))
   (let (
-    (energy-cost (* amount (var-get energy-price)))
+    (current-for-sale (get amount (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender}))))
+  )
+    (asserts! (>= current-for-sale amount) err-not-enough-balance)
+    (map-set energy-for-sale {user: tx-sender} 
+             {amount: (- current-for-sale amount), 
+              price: (get price (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender})))})
+    (ok true)))
+
+;; Buy energy from user
+(define-public (buy-energy-from-user (seller principal) (amount uint))
+  (let (
+    (sale-data (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: seller})))
+    (energy-cost (* amount (get price sale-data)))
     (commission (calculate-commission energy-cost))
     (total-cost (+ energy-cost commission))
-    (seller-energy (default-to u0 (map-get? user-energy-balance contract-owner)))
+    (seller-energy (default-to u0 (map-get? user-energy-balance seller)))
     (buyer-balance (default-to u0 (map-get? user-stx-balance tx-sender)))
+    (seller-balance (default-to u0 (map-get? user-stx-balance seller)))
     (owner-balance (default-to u0 (map-get? user-stx-balance contract-owner)))
   )
+    (asserts! (not (is-eq tx-sender seller)) err-same-user)
     (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
+    (asserts! (>= (get amount sale-data) amount) err-not-enough-balance)
     (asserts! (>= seller-energy amount) err-not-enough-balance)
     (asserts! (>= buyer-balance total-cost) err-not-enough-balance)
     
-    ;; Update seller's energy balance
-    (map-set user-energy-balance contract-owner (- seller-energy amount))
+    ;; Update seller's energy balance and for-sale amount
+    (map-set user-energy-balance seller (- seller-energy amount))
+    (map-set energy-for-sale {user: seller} 
+             {amount: (- (get amount sale-data) amount), price: (get price sale-data)})
     
     ;; Update buyer's STX and energy balance
     (map-set user-stx-balance tx-sender (- buyer-balance total-cost))
     (map-set user-energy-balance tx-sender (+ (default-to u0 (map-get? user-energy-balance tx-sender)) amount))
     
-    ;; Update contract owner's STX balance (energy cost + commission)
-    (map-set user-stx-balance contract-owner (+ owner-balance total-cost))
+    ;; Update seller's and contract owner's STX balance
+    (map-set user-stx-balance seller (+ seller-balance energy-cost))
+    (map-set user-stx-balance contract-owner (+ owner-balance commission))
     
     (ok true)))
 
@@ -137,6 +159,10 @@
 ;; Get user's STX balance
 (define-read-only (get-stx-balance (user principal))
   (ok (default-to u0 (map-get? user-stx-balance user))))
+
+;; Get energy for sale by user
+(define-read-only (get-energy-for-sale (user principal))
+  (ok (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: user}))))
 
 ;; Get maximum energy per user
 (define-read-only (get-max-energy-per-user)
