@@ -1,4 +1,4 @@
-;; Energy Trading Smart Contract
+;; WattConnect - Energy Trading Smart Contract
 
 ;; Define constants
 (define-constant contract-owner tx-sender)
@@ -8,11 +8,13 @@
 (define-constant err-invalid-price (err u103))
 (define-constant err-invalid-amount (err u104))
 (define-constant err-invalid-fee (err u105))
+(define-constant err-refund-failed (err u106))
 
 ;; Define data variables
 (define-data-var energy-price uint u100) ;; Price per kWh in microstacks (1 STX = 1,000,000 microstacks)
 (define-data-var max-energy-per-user uint u10000) ;; Maximum energy a user can add (in kWh)
 (define-data-var commission-rate uint u5) ;; Commission rate in percentage (e.g., 5 means 5%)
+(define-data-var refund-rate uint u90) ;; Refund rate in percentage (e.g., 90 means 90% of current price)
 
 ;; Define data maps
 (define-map user-energy-balance principal uint)
@@ -23,6 +25,10 @@
 ;; Calculate commission
 (define-private (calculate-commission (amount uint))
   (/ (* amount (var-get commission-rate)) u100))
+
+;; Calculate refund amount
+(define-private (calculate-refund (amount uint))
+  (/ (* amount (var-get energy-price) (var-get refund-rate)) u100))
 
 ;; Public functions
 
@@ -40,6 +46,14 @@
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
     (asserts! (<= new-rate u100) err-invalid-fee) ;; Ensure rate is not more than 100%
     (var-set commission-rate new-rate)
+    (ok true)))
+
+;; Set refund rate (only contract owner)
+(define-public (set-refund-rate (new-rate uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= new-rate u100) err-invalid-fee) ;; Ensure rate is not more than 100%
+    (var-set refund-rate new-rate)
     (ok true)))
 
 ;; Add energy to sell
@@ -79,6 +93,29 @@
     
     (ok true)))
 
+;; Refund energy
+(define-public (refund-energy (amount uint))
+  (let (
+    (user-energy (default-to u0 (map-get? user-energy-balance tx-sender)))
+    (refund-amount (calculate-refund amount))
+    (contract-stx-balance (default-to u0 (map-get? user-stx-balance contract-owner)))
+  )
+    (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
+    (asserts! (>= user-energy amount) err-not-enough-balance)
+    (asserts! (>= contract-stx-balance refund-amount) err-refund-failed)
+    
+    ;; Update user's energy balance
+    (map-set user-energy-balance tx-sender (- user-energy amount))
+    
+    ;; Update user's and contract's STX balance
+    (map-set user-stx-balance tx-sender (+ (default-to u0 (map-get? user-stx-balance tx-sender)) refund-amount))
+    (map-set user-stx-balance contract-owner (- contract-stx-balance refund-amount))
+    
+    ;; Add refunded energy back to contract owner's balance
+    (map-set user-energy-balance contract-owner (+ (default-to u0 (map-get? user-energy-balance contract-owner)) amount))
+    
+    (ok true)))
+
 ;; Read-only functions
 
 ;; Get current energy price
@@ -88,6 +125,10 @@
 ;; Get current commission rate
 (define-read-only (get-commission-rate)
   (ok (var-get commission-rate)))
+
+;; Get current refund rate
+(define-read-only (get-refund-rate)
+  (ok (var-get refund-rate)))
 
 ;; Get user's energy balance
 (define-read-only (get-energy-balance (user principal))
