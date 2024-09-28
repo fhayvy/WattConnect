@@ -5,9 +5,12 @@
 (define-constant err-owner-only (err u100))
 (define-constant err-not-enough-balance (err u101))
 (define-constant err-transfer-failed (err u102))
+(define-constant err-invalid-price (err u103))
+(define-constant err-invalid-amount (err u104))
 
 ;; Define data variables
 (define-data-var energy-price uint u100) ;; Price per kWh in microstacks (1 STX = 1,000,000 microstacks)
+(define-data-var max-energy-per-user uint u10000) ;; Maximum energy a user can add (in kWh)
 
 ;; Define data maps
 (define-map user-energy-balance principal uint)
@@ -19,13 +22,19 @@
 (define-public (set-energy-price (new-price uint))
   (begin
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (> new-price u0) err-invalid-price) ;; Ensure price is greater than 0
     (var-set energy-price new-price)
     (ok true)))
 
 ;; Add energy to sell
 (define-public (add-energy (amount uint))
-  (let ((current-balance (default-to u0 (map-get? user-energy-balance tx-sender))))
-    (map-set user-energy-balance tx-sender (+ current-balance amount))
+  (let (
+    (current-balance (default-to u0 (map-get? user-energy-balance tx-sender)))
+    (new-balance (+ current-balance amount))
+  )
+    (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
+    (asserts! (<= new-balance (var-get max-energy-per-user)) err-invalid-amount) ;; Ensure user doesn't exceed max energy limit
+    (map-set user-energy-balance tx-sender new-balance)
     (ok true)))
 
 ;; Buy energy
@@ -35,6 +44,7 @@
     (seller-energy (default-to u0 (map-get? user-energy-balance contract-owner)))
     (buyer-balance (default-to u0 (map-get? user-stx-balance tx-sender)))
   )
+    (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
     (asserts! (>= seller-energy amount) err-not-enough-balance)
     (asserts! (>= buyer-balance total-cost) err-not-enough-balance)
     (map-set user-energy-balance contract-owner (- seller-energy amount))
@@ -57,3 +67,15 @@
 ;; Get user's STX balance
 (define-read-only (get-stx-balance (user principal))
   (ok (default-to u0 (map-get? user-stx-balance user))))
+
+;; Get maximum energy per user
+(define-read-only (get-max-energy-per-user)
+  (ok (var-get max-energy-per-user)))
+
+;; Set maximum energy per user (only contract owner)
+(define-public (set-max-energy-per-user (new-max uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (> new-max u0) err-invalid-amount) ;; Ensure new max is greater than 0
+    (var-set max-energy-per-user new-max)
+    (ok true)))
