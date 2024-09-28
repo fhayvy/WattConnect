@@ -1,4 +1,4 @@
-;; WattConnect - Energy Trading Smart Contract
+;;WattConnect - Energy Trading Smart Contract
 
 ;; Define constants
 (define-constant contract-owner tx-sender)
@@ -10,12 +10,16 @@
 (define-constant err-invalid-fee (err u105))
 (define-constant err-refund-failed (err u106))
 (define-constant err-same-user (err u107))
+(define-constant err-reserve-limit-exceeded (err u108))
+(define-constant err-invalid-reserve-limit (err u109))
 
 ;; Define data variables
 (define-data-var energy-price uint u100) ;; Price per kWh in microstacks (1 STX = 1,000,000 microstacks)
 (define-data-var max-energy-per-user uint u10000) ;; Maximum energy a user can add (in kWh)
 (define-data-var commission-rate uint u5) ;; Commission rate in percentage (e.g., 5 means 5%)
 (define-data-var refund-rate uint u90) ;; Refund rate in percentage (e.g., 90 means 90% of current price)
+(define-data-var energy-reserve-limit uint u1000000) ;; Global energy reserve limit (in kWh)
+(define-data-var current-energy-reserve uint u0) ;; Current total energy in the system (in kWh)
 
 ;; Define data maps
 (define-map user-energy-balance principal uint)
@@ -31,6 +35,13 @@
 ;; Calculate refund amount
 (define-private (calculate-refund (amount uint))
   (/ (* amount (var-get energy-price) (var-get refund-rate)) u100))
+
+;; Update energy reserve
+(define-private (update-energy-reserve (amount int))
+  (let ((new-reserve (+ (var-get current-energy-reserve) amount)))
+    (asserts! (and (>= new-reserve u0) (<= new-reserve (var-get energy-reserve-limit))) err-reserve-limit-exceeded)
+    (var-set current-energy-reserve new-reserve)
+    (ok true)))
 
 ;; Public functions
 
@@ -58,6 +69,14 @@
     (var-set refund-rate new-rate)
     (ok true)))
 
+;; Set energy reserve limit (only contract owner)
+(define-public (set-energy-reserve-limit (new-limit uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (>= new-limit (var-get current-energy-reserve)) err-invalid-reserve-limit)
+    (var-set energy-reserve-limit new-limit)
+    (ok true)))
+
 ;; Add energy for sale
 (define-public (add-energy-for-sale (amount uint) (price uint))
   (let (
@@ -68,6 +87,7 @@
     (asserts! (> amount u0) err-invalid-amount) ;; Ensure amount is greater than 0
     (asserts! (> price u0) err-invalid-price) ;; Ensure price is greater than 0
     (asserts! (>= current-balance new-for-sale) err-not-enough-balance)
+    (try! (update-energy-reserve (to-int amount)))
     (map-set energy-for-sale {user: tx-sender} {amount: new-for-sale, price: price})
     (ok true)))
 
@@ -77,6 +97,7 @@
     (current-for-sale (get amount (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender}))))
   )
     (asserts! (>= current-for-sale amount) err-not-enough-balance)
+    (try! (update-energy-reserve (- (to-int amount))))
     (map-set energy-for-sale {user: tx-sender} 
              {amount: (- current-for-sale amount), 
               price: (get price (default-to {amount: u0, price: u0} (map-get? energy-for-sale {user: tx-sender})))})
@@ -136,6 +157,9 @@
     ;; Add refunded energy back to contract owner's balance
     (map-set user-energy-balance contract-owner (+ (default-to u0 (map-get? user-energy-balance contract-owner)) amount))
     
+    ;; Update energy reserve
+    (try! (update-energy-reserve (- (to-int amount))))
+    
     (ok true)))
 
 ;; Read-only functions
@@ -167,6 +191,14 @@
 ;; Get maximum energy per user
 (define-read-only (get-max-energy-per-user)
   (ok (var-get max-energy-per-user)))
+
+;; Get current energy reserve
+(define-read-only (get-current-energy-reserve)
+  (ok (var-get current-energy-reserve)))
+
+;; Get energy reserve limit
+(define-read-only (get-energy-reserve-limit)
+  (ok (var-get energy-reserve-limit)))
 
 ;; Set maximum energy per user (only contract owner)
 (define-public (set-max-energy-per-user (new-max uint))
