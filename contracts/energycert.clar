@@ -12,6 +12,7 @@
 (define-constant err-invalid-fee (err u206))
 (define-constant err-invalid-minimum (err u207))
 (define-constant err-invalid-string (err u208))
+(define-constant err-invalid-reason (err u209))
 
 ;; Define data variables
 (define-data-var certification-fee uint u1000) ;; Fee in microstacks for certification
@@ -28,7 +29,10 @@
         total-production: uint,
         last-certification-date: uint,
         energy-source: (string-ascii 20),
-        certification-status: bool
+        certification-status: bool,
+        revocation-reason: (optional (string-ascii 50)),
+        revocation-date: (optional uint),
+        revoked-by: (optional principal)
     })
 
 ;; Private functions
@@ -39,6 +43,16 @@
     (let 
         ((length (len input)))
         (and (> length u0) (<= length u20))))
+
+(define-private (validate-revocation-reason (reason (string-ascii 50)))
+    (let 
+        ((length (len reason)))
+        (and (> length u0) (<= length u50))))
+
+(define-private (can-revoke-certification (caller principal))
+    (or 
+        (is-eq caller contract-owner)
+        (is-authorized-certifier caller)))
 
 ;; Public functions
 
@@ -74,7 +88,10 @@
                 total-production: u0,
                 last-certification-date: u0,
                 energy-source: "",
-                certification-status: false
+                certification-status: false,
+                revocation-reason: none,
+                revocation-date: none,
+                revoked-by: none
             }
             (map-get? producer-energy-data tx-sender)))
     )
@@ -93,7 +110,10 @@
                 total-production: energy-amount,
                 last-certification-date: block-height,
                 energy-source: energy-source,
-                certification-status: false
+                certification-status: false,
+                revocation-reason: none,
+                revocation-date: none,
+                revoked-by: none
             })
         (ok true)))
 
@@ -105,7 +125,10 @@
                 total-production: u0,
                 last-certification-date: u0,
                 energy-source: "",
-                certification-status: false
+                certification-status: false,
+                revocation-reason: none,
+                revocation-date: none,
+                revoked-by: none
             }
             (map-get? producer-energy-data producer)))
     )
@@ -122,26 +145,41 @@
                 total-production: (get total-production producer-data),
                 last-certification-date: block-height,
                 energy-source: (get energy-source producer-data),
-                certification-status: true
+                certification-status: true,
+                revocation-reason: none,
+                revocation-date: none,
+                revoked-by: none
             })
         (map-set certified-producers producer true)
         (ok true)))
 
-;; Revoke certification (only authorized certifiers)
-(define-public (revoke-certification (producer principal))
+;; Enhanced revoke certification function (contract owner or authorized certifiers)
+(define-public (revoke-certification (producer principal) (reason (string-ascii 50)))
     (begin
-        (asserts! (is-authorized-certifier tx-sender) err-invalid-certifier)
+        ;; Check if caller is authorized to revoke
+        (asserts! (can-revoke-certification tx-sender) err-not-authorized)
+        ;; Check if producer is currently certified
         (asserts! (default-to false (map-get? certified-producers producer)) err-not-certified)
+        ;; Validate revocation reason
+        (asserts! (validate-revocation-reason reason) err-invalid-reason)
         
-        (map-delete certified-producers producer)
-        (map-set producer-energy-data producer
-            {
-                total-production: u0,
-                last-certification-date: u0,
-                energy-source: "",
-                certification-status: false
-            })
-        (ok true)))
+        ;; Get current producer data
+        (let (
+            (producer-data (unwrap! (map-get? producer-energy-data producer) err-not-certified))
+        )
+            ;; Update producer data with revocation details
+            (map-set producer-energy-data producer
+                {
+                    total-production: (get total-production producer-data),
+                    last-certification-date: (get last-certification-date producer-data),
+                    energy-source: (get energy-source producer-data),
+                    certification-status: false,
+                    revocation-reason: (some reason),
+                    revocation-date: (some block-height),
+                    revoked-by: (some tx-sender)
+                })
+            (map-delete certified-producers producer)
+            (ok true))))
 
 ;; Read-only functions
 
@@ -149,14 +187,17 @@
 (define-read-only (is-certified (producer principal))
     (ok (default-to false (map-get? certified-producers producer))))
 
-;; Get producer data
+;; Get producer data including revocation history
 (define-read-only (get-producer-data (producer principal))
     (ok (default-to
         {
             total-production: u0,
             last-certification-date: u0,
             energy-source: "",
-            certification-status: false
+            certification-status: false,
+            revocation-reason: none,
+            revocation-date: none,
+            revoked-by: none
         }
         (map-get? producer-energy-data producer))))
 
