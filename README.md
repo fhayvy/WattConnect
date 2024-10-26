@@ -84,7 +84,7 @@ We welcome contributions to WattConnect! If you'd like to contribute, please fol
 
 Favour Chiamaka Eze - ezefavourchiamaka01@gmail.com
 
-Project Link: [https://github.com/yourusername/WattConnect](https://github.com/yourusername/WattConnect)
+Project Link: [https://github.com/fhayvy/WattConnect](https://github.com/fhayvy/WattConnect)
 
 ## Acknowledgments
 
